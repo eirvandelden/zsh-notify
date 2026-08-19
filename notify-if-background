@@ -1,21 +1,24 @@
 # vim: set nowrap filetype=zsh:
 #
-# Post a notification using either Notification Center using
-# terminal-notifier.app or Growl, through growlnotify.
+# Post a notification using noti (https://github.com/variadico/noti), which
+# dispatches to macOS Notification Center or Linux notify-send on its own.
+# Falls back to growlnotify, then to notify-send directly, if noti isn't
+# installed.
 #
 # Notification is effectively posted only if the terminal application
-# (either Terminal.app or iTerm2) is in background, or if the session tab
-# is not active (or in other word when you are not looking at the shell). 
+# (Terminal.app, iTerm2, or Ghostty) is in background, or if the session tab
+# is not active (or in other word when you are not looking at the shell).
+# On Linux, or if the frontmost app can't be determined, the notification is
+# always posted rather than risk silently swallowing it.
 #
-# Exits with status 1 if the terminal app is unsupported, or if the
-# notifier program is not found.
+# Exits with status 1 if the notifier program is not found.
 #
 # Exits with status 2 if the terminal is frontmost or the tab is active.
 #
 # Requirements:
 #
-# - terminal-notifier.app
-#   https://github.com/alloy/terminal-notifier 
+# - noti
+#   https://github.com/variadico/noti
 #
 # - growlnotify
 #   http://growl.info/extras.php/#growlnotify
@@ -29,7 +32,7 @@ title=$otitle[2]
 message=$(<&0)
 
 [[ -z "$SYS_NOTIFIER" ]] \
-  && SYS_NOTIFIER="/usr/local/bin/terminal-notifier"
+  && SYS_NOTIFIER="/usr/local/bin/noti"
 
 [[ -z "$GROWL_NOTIFIER" ]] \
   && GROWL_NOTIFIER="/usr/local/bin/growlnotify"
@@ -41,11 +44,14 @@ if [[ "$TERM_PROGRAM" == 'iTerm.app' ]]; then
   term_id='com.googlecode.iterm2'
 elif [[ "$TERM_PROGRAM" == 'Apple_Terminal' ]]; then
   term_id='com.apple.terminal'
-elif [[ -x $(which xdotool) ]]; then
-  term_id='check_xdotool'
+elif [[ "$TERM_PROGRAM" == 'ghostty' ]]; then
+  term_id='com.mitchellh.ghostty'
 else
-  # echo "Unsupported terminal: $TERM_PROGRAM" > /dev/stderr 
-  return 1;
+  # Covers Linux (Konsole, gnome-terminal, ...) and anything else we don't
+  # have a frontmost-app check for. xdotool/wmctrl only work under X11, and
+  # SteamOS/Plasma desktop mode defaults to Wayland, so we don't gate on
+  # them here — always notify rather than silently drop it.
+  term_id='always_notify'
 fi
 
 if [[ $term_id == 'com.googlecode.iterm2' ]]; then
@@ -58,32 +64,21 @@ elif [[ $term_id == 'com.apple.terminal' ]]; then
   if [[ `$TT <<<frontmost` == "true" && `$TT -tab <<<selected` == "true" ]]; then
     return 2
   fi
-elif [[ $term_id == 'check_xdotool' ]]; then
-  ACTIVE_WID=$(xdotool getactivewindow)
-  if [[ -z "$TMUX" ]]; then
-    if [[ "$ACTIVE_WID" == "$WINDOWID" ]]; then
-      return 2
-    fi
-  else
-    ACTIVE_PANE=$(tmux list-windows -F '#{window_active} #{pane_id}' | grep -i '1' | awk '{ print $2 }')
-    if [[ ("$TMUX_PANE" == "$ACTIVE_PANE") && ("$ACTIVE_WID" == "$WINDOWID") ]]; then
-       return 2
-    fi
+elif [[ $term_id == 'com.mitchellh.ghostty' ]]; then
+  # Ghostty has no AppleScript dictionary, so this can only tell whether
+  # Ghostty is frontmost at all, not which tab/window is active.
+  frontmost_bundle_id=`osascript -e 'tell application "System Events" to bundle identifier of first application process whose frontmost is true'`
+  if [[ "$frontmost_bundle_id" == "$term_id" ]]; then
+    return 2
   fi
-else
-  # shouldn't actually get up to here
-  return 2
 fi
-
-#cat /dev/stdin | growlnotify "$@"
-# growlnotify "$@" < /dev/stdin
-
+# 'always_notify' falls through to the notifier below with no frontmost check.
 
 if [[ -x "$SYS_NOTIFIER" ]]; then
-  "$SYS_NOTIFIER" -activate "$term_id" -sender "$term_id" -title "$title" -message "$message" 1>/dev/null 
+  "$SYS_NOTIFIER" -t "$title" -m "$message" 1>/dev/null
 elif [[ -x "$GROWL_NOTIFIER" ]]; then
   [[ ! -z "$icon" ]] && icon_switch="--iconpath $icon"
-  echo "$message" | "$GROWL_NOTIFIER" "$title" 
+  echo "$message" | "$GROWL_NOTIFIER" "$title"
 elif [[ -x "$NOTIFY_NOTIFIER" ]]; then
   "$NOTIFY_NOTIFIER" "$title" "$message"
   if (( $+commands[wmctrl] )); then
