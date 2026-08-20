@@ -1,9 +1,9 @@
 # vim: set nowrap filetype=zsh:
 #
-# Post a notification using noti (https://github.com/variadico/noti), which
-# dispatches to macOS Notification Center or Linux notify-send on its own.
-# Falls back to growlnotify, then to notify-send directly, if noti isn't
-# installed.
+# Post a notification using noti (https://codeberg.org/roble/noti), which
+# dispatches to macOS Notification Center or the Linux desktop's freedesktop
+# notification service on its own. Falls back to growlnotify, then to
+# notify-send directly, if noti isn't installed.
 #
 # Notification is effectively posted only if the terminal application
 # (Terminal.app, iTerm2, or Ghostty) is in background, or if the session tab
@@ -18,7 +18,7 @@
 # Requirements:
 #
 # - noti
-#   https://github.com/variadico/noti
+#   https://codeberg.org/roble/noti
 #
 # - growlnotify
 #   http://growl.info/extras.php/#growlnotify
@@ -32,7 +32,7 @@ title=$otitle[2]
 message=$(<&0)
 
 [[ -z "$SYS_NOTIFIER" ]] \
-  && SYS_NOTIFIER="/usr/local/bin/noti"
+  && SYS_NOTIFIER="${commands[noti]:-/usr/local/bin/noti}"
 
 [[ -z "$GROWL_NOTIFIER" ]] \
   && GROWL_NOTIFIER="/usr/local/bin/growlnotify"
@@ -44,7 +44,7 @@ if [[ "$TERM_PROGRAM" == 'iTerm.app' ]]; then
   term_id='com.googlecode.iterm2'
 elif [[ "$TERM_PROGRAM" == 'Apple_Terminal' ]]; then
   term_id='com.apple.terminal'
-elif [[ "$TERM_PROGRAM" == 'ghostty' ]]; then
+elif [[ "$TERM_PROGRAM" == 'ghostty' ]] && (( $+commands[osascript] )); then
   term_id='com.mitchellh.ghostty'
 else
   # Covers Linux (Konsole, gnome-terminal, ...) and anything else we don't
